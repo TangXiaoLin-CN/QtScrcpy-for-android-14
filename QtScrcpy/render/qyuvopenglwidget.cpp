@@ -258,9 +258,7 @@ void QYUVOpenGLWidget::initTextures()
 void QYUVOpenGLWidget::deInitTextures()
 {
     if (m_textureInited) {
-        makeCurrent();
         glDeleteTextures(3, m_texture);
-        doneCurrent();
     }
 
     memset(m_texture, 0, sizeof(m_texture));
