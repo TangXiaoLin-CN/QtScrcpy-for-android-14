@@ -13,6 +13,7 @@
 #include <QCheckBox>
 #include <QDebug>
 #include <QContextMenuEvent>
+#include <QCoreApplication>
 
 // ============================================================================
 // KeyMapWidget Implementation
@@ -114,10 +115,11 @@ void KeyMapWidget::paintEvent(QPaintEvent *event)
 
 void KeyMapWidget::mousePressEvent(QMouseEvent *event)
 {
+    qDebug() << "KeyMapWidget::mousePressEvent" << this;
     if (event->button() == Qt::LeftButton) {
-        m_dragging = true;
         m_dragStartPos = event->pos();
         m_selected = true;
+        qDebug() << "Emitting selected signal for" << this;
         emit selected(this);
         update();
     }
@@ -126,23 +128,33 @@ void KeyMapWidget::mousePressEvent(QMouseEvent *event)
 
 void KeyMapWidget::mouseMoveEvent(QMouseEvent *event)
 {
-    if (m_dragging) {
-        QPoint delta = event->pos() - m_dragStartPos;
-        QPoint newPos = pos() + delta;
-
-        // Keep within parent bounds
-        if (parentWidget()) {
-            newPos.setX(qBound(0, newPos.x(), parentWidget()->width() - width()));
-            newPos.setY(qBound(0, newPos.y(), parentWidget()->height() - height()));
+    if (event->buttons() & Qt::LeftButton) {
+        // Only start dragging if moved more than a threshold
+        if (!m_dragging) {
+            QPoint delta = event->pos() - m_dragStartPos;
+            if (delta.manhattanLength() > 5) {
+                m_dragging = true;
+            }
         }
 
-        move(newPos);
+        if (m_dragging) {
+            QPoint delta = event->pos() - m_dragStartPos;
+            QPoint newPos = pos() + delta;
 
-        // Update percentage position
-        if (m_screenSize.isValid()) {
-            m_position.setX(static_cast<double>(newPos.x() + width() / 2) / m_screenSize.width());
-            m_position.setY(static_cast<double>(newPos.y() + height() / 2) / m_screenSize.height());
-            emit positionChanged(m_position);
+            // Keep within parent bounds
+            if (parentWidget()) {
+                newPos.setX(qBound(0, newPos.x(), parentWidget()->width() - width()));
+                newPos.setY(qBound(0, newPos.y(), parentWidget()->height() - height()));
+            }
+
+            move(newPos);
+
+            // Update percentage position
+            if (m_screenSize.isValid()) {
+                m_position.setX(static_cast<double>(newPos.x() + width() / 2) / m_screenSize.width());
+                m_position.setY(static_cast<double>(newPos.y() + height() / 2) / m_screenSize.height());
+                emit positionChanged(m_position);
+            }
         }
     }
     QWidget::mouseMoveEvent(event);
@@ -309,7 +321,16 @@ void KeyMapEditor::setupScreenArea()
 void KeyMapEditor::setupPropertiesPanel()
 {
     m_propertiesPanel = new QWidget(this);
-    m_propertiesPanel->setStyleSheet("QWidget { background-color: #ecf0f1; }");
+    m_propertiesPanel->setStyleSheet(
+        "QWidget { background-color: #ecf0f1; color: #2c3e50; } "
+        "QLabel { color: #2c3e50; } "
+        "QLineEdit { background-color: white; color: #2c3e50; border: 1px solid #bdc3c7; padding: 4px; } "
+        "QComboBox { background-color: white; color: #2c3e50; border: 1px solid #bdc3c7; padding: 4px; } "
+        "QSpinBox, QDoubleSpinBox { background-color: white; color: #2c3e50; border: 1px solid #bdc3c7; padding: 4px; } "
+        "QCheckBox { color: #2c3e50; } "
+        "QGroupBox { color: #2c3e50; font-weight: bold; border: 1px solid #bdc3c7; border-radius: 4px; margin-top: 8px; padding-top: 8px; } "
+        "QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 5px; }"
+    );
     m_propertiesPanel->setMinimumWidth(350);
     m_propertiesPanel->setMaximumWidth(450);
 
@@ -342,9 +363,27 @@ void KeyMapEditor::setupPropertiesPanel()
     m_keyMapList->setStyleSheet("QListWidget { background-color: white; border: 1px solid #bdc3c7; }");
     m_propertiesLayout->addWidget(m_keyMapList);
 
+    connect(m_keyMapList, &QListWidget::currentRowChanged, this, [this](int row) {
+        if (row >= 0 && row < m_keyMapWidgets.size()) {
+            onKeyMapSelected(m_keyMapWidgets[row]);
+        }
+    });
+
     // Properties editor
     QGroupBox *propsGroup = new QGroupBox("Selected Key Properties", m_propertiesPanel);
-    QFormLayout *formLayout = new QFormLayout(propsGroup);
+
+    // Add scroll area for properties
+    QScrollArea *propsScrollArea = new QScrollArea(propsGroup);
+    propsScrollArea->setWidgetResizable(true);
+    propsScrollArea->setFrameShape(QFrame::NoFrame);
+    propsScrollArea->setStyleSheet("QScrollArea { background-color: transparent; border: none; }");
+
+    QWidget *propsScrollWidget = new QWidget();
+    QFormLayout *formLayout = new QFormLayout(propsScrollWidget);
+    propsScrollArea->setWidget(propsScrollWidget);
+
+    QVBoxLayout *propsGroupLayout = new QVBoxLayout(propsGroup);
+    propsGroupLayout->addWidget(propsScrollArea);
 
     m_typeCombo = new QComboBox(propsGroup);
     m_typeCombo->addItem("Click", KeyMapWidget::MT_CLICK);
@@ -418,6 +457,17 @@ void KeyMapEditor::onAddKeyMap()
 
     connect(widget, &KeyMapWidget::selected, this, &KeyMapEditor::onKeyMapSelected);
     connect(widget, &KeyMapWidget::deleted, this, &KeyMapEditor::onDeleteKeyMap);
+    connect(widget, &KeyMapWidget::positionChanged, this, [this](const QPointF &pos) {
+        if (m_selectedWidget && sender() == m_selectedWidget) {
+            // Update position fields in real-time during drag
+            m_posXEdit->blockSignals(true);
+            m_posYEdit->blockSignals(true);
+            m_posXEdit->setText(QString::number(pos.x(), 'f', 3));
+            m_posYEdit->setText(QString::number(pos.y(), 'f', 3));
+            m_posXEdit->blockSignals(false);
+            m_posYEdit->blockSignals(false);
+        }
+    });
 
     m_keyMapWidgets.append(widget);
 
@@ -449,21 +499,58 @@ void KeyMapEditor::onDeleteKeyMap()
 
 void KeyMapEditor::onKeyMapSelected(KeyMapWidget *widget)
 {
+    qDebug() << "=== onKeyMapSelected START ===" << widget;
+
+    // Prevent re-entry
+    static bool isUpdating = false;
+    if (isUpdating) {
+        qDebug() << "onKeyMapSelected: Already updating, returning";
+        return;
+    }
+    isUpdating = true;
+
     // Deselect previous
     if (m_selectedWidget) {
+        qDebug() << "Deselecting previous widget:" << m_selectedWidget;
         m_selectedWidget->update();
     }
 
     m_selectedWidget = widget;
+    qDebug() << "Selected new widget:" << widget;
+
     updatePropertiesPanel();
+
+    isUpdating = false;
+    qDebug() << "=== onKeyMapSelected END ===";
 }
 
 void KeyMapEditor::updatePropertiesPanel()
 {
-    if (!m_selectedWidget) {
-        clearPropertiesPanel();
+    qDebug() << ">>> updatePropertiesPanel START";
+
+    // Prevent re-entry
+    static bool isUpdating = false;
+    if (isUpdating) {
+        qDebug() << "updatePropertiesPanel: Already updating, returning";
         return;
     }
+    isUpdating = true;
+
+    if (!m_selectedWidget) {
+        qDebug() << "No selected widget, clearing panel";
+        clearPropertiesPanel();
+        isUpdating = false;
+        return;
+    }
+
+    qDebug() << "Updating panel for widget:" << m_selectedWidget << "type:" << m_selectedWidget->mapType();
+
+    // Block signals to prevent triggering change handlers
+    m_typeCombo->blockSignals(true);
+    m_keyBindingEdit->blockSignals(true);
+    m_commentEdit->blockSignals(true);
+    m_posXEdit->blockSignals(true);
+    m_posYEdit->blockSignals(true);
 
     m_typeCombo->setCurrentIndex(m_selectedWidget->mapType());
     m_keyBindingEdit->setText(m_selectedWidget->keyBinding());
@@ -477,6 +564,20 @@ void KeyMapEditor::updatePropertiesPanel()
     m_posXEdit->setEnabled(true);
     m_posYEdit->setEnabled(true);
     m_btnDelete->setEnabled(true);
+
+    // Unblock signals
+    m_typeCombo->blockSignals(false);
+    m_keyBindingEdit->blockSignals(false);
+    m_commentEdit->blockSignals(false);
+    m_posXEdit->blockSignals(false);
+    m_posYEdit->blockSignals(false);
+
+    qDebug() << "Calling updateTypeSpecificProperties";
+    // Update type-specific properties
+    updateTypeSpecificProperties(m_selectedWidget->mapType());
+
+    isUpdating = false;
+    qDebug() << ">>> updatePropertiesPanel END";
 }
 
 void KeyMapEditor::clearPropertiesPanel()
@@ -493,12 +594,294 @@ void KeyMapEditor::clearPropertiesPanel()
     m_posXEdit->setEnabled(false);
     m_posYEdit->setEnabled(false);
     m_btnDelete->setEnabled(false);
+
+    // Clear type-specific properties
+    clearTypeSpecificProperties();
 }
 
 void KeyMapEditor::onTypeChanged(int index)
 {
     if (m_selectedWidget) {
-        m_selectedWidget->setMapType(static_cast<KeyMapWidget::MapType>(index));
+        KeyMapWidget::MapType type = static_cast<KeyMapWidget::MapType>(index);
+        m_selectedWidget->setMapType(type);
+        updateTypeSpecificProperties(type);
+    }
+}
+
+void KeyMapEditor::clearTypeSpecificProperties()
+{
+    qDebug() << "    clearTypeSpecificProperties START, layout count:" << m_additionalPropsLayout->count();
+
+    // Prevent re-entry
+    static bool isClearing = false;
+    if (isClearing) {
+        qDebug() << "    clearTypeSpecificProperties: Already clearing, returning";
+        return;
+    }
+    isClearing = true;
+
+    // Clear all type-specific widgets first
+    m_typeSpecificWidgets.clear();
+
+    // Take all items from the layout
+    int itemCount = 0;
+    while (m_additionalPropsLayout->count() > 0) {
+        itemCount++;
+        qDebug() << "    Removing item" << itemCount << "from layout";
+
+        QLayoutItem *item = m_additionalPropsLayout->takeAt(0);
+        if (!item) {
+            qDebug() << "    Item is null, breaking";
+            break;
+        }
+
+        if (item->widget()) {
+            qDebug() << "    Item is a widget";
+            QWidget *widget = item->widget();
+            widget->setParent(nullptr);
+            widget->deleteLater();
+        } else if (item->layout()) {
+            qDebug() << "    Item is a layout with" << item->layout()->count() << "items";
+            QLayout *layout = item->layout();
+            // Recursively clear the nested layout
+            int subItemCount = 0;
+            while (layout->count() > 0) {
+                subItemCount++;
+                qDebug() << "      Removing sub-item" << subItemCount;
+
+                QLayoutItem *subItem = layout->takeAt(0);
+                if (!subItem) {
+                    qDebug() << "      Sub-item is null, breaking";
+                    break;
+                }
+
+                if (subItem->widget()) {
+                    QWidget *subWidget = subItem->widget();
+                    subWidget->setParent(nullptr);
+                    subWidget->deleteLater();
+                }
+                delete subItem;
+            }
+            qDebug() << "    Scheduling layout for deletion";
+            // Don't delete layout immediately - let Qt handle it
+            layout->setParent(nullptr);
+            // We can't use deleteLater on QLayout, so we just leave it orphaned
+            // Qt will clean it up when the parent widget is destroyed
+        }
+        delete item;
+    }
+
+    isClearing = false;
+    qDebug() << "    clearTypeSpecificProperties END";
+}
+
+void KeyMapEditor::updateTypeSpecificProperties(KeyMapWidget::MapType type)
+{
+    qDebug() << "  updateTypeSpecificProperties START, type:" << type;
+    clearTypeSpecificProperties();
+
+    QFormLayout *formLayout = new QFormLayout();
+    m_additionalPropsLayout->addLayout(formLayout);
+
+    switch (type) {
+    case KeyMapWidget::MT_CLICK: {
+        // Click: switchMap, resetMap
+        QCheckBox *switchMapCheck = new QCheckBox();
+        QCheckBox *resetMapCheck = new QCheckBox();
+        formLayout->addRow("Switch Map:", switchMapCheck);
+        formLayout->addRow("Reset Map:", resetMapCheck);
+        m_typeSpecificWidgets["switchMap"] = switchMapCheck;
+        m_typeSpecificWidgets["resetMap"] = resetMapCheck;
+
+        // Load existing data
+        if (m_selectedWidget && m_selectedWidget->data().contains("switchMap")) {
+            switchMapCheck->setChecked(m_selectedWidget->data()["switchMap"].toBool());
+        }
+        if (m_selectedWidget && m_selectedWidget->data().contains("resetMap")) {
+            resetMapCheck->setChecked(m_selectedWidget->data()["resetMap"].toBool());
+        }
+        break;
+    }
+    case KeyMapWidget::MT_CLICK_TWICE: {
+        // Click Twice: no additional parameters
+        QLabel *infoLabel = new QLabel("Double click at the position");
+        infoLabel->setWordWrap(true);
+        formLayout->addRow(infoLabel);
+        break;
+    }
+    case KeyMapWidget::MT_CLICK_MULTI: {
+        // Click Multi: multiple click positions
+        QLabel *infoLabel = new QLabel("Multiple click positions (TODO: Add UI for multiple positions)");
+        infoLabel->setWordWrap(true);
+        formLayout->addRow(infoLabel);
+        break;
+    }
+    case KeyMapWidget::MT_STEER_WHEEL: {
+        // Steer Wheel: centerPos, leftOffset, rightOffset, upOffset, downOffset, leftKey, rightKey, upKey, downKey
+        QDoubleSpinBox *leftOffset = new QDoubleSpinBox();
+        QDoubleSpinBox *rightOffset = new QDoubleSpinBox();
+        QDoubleSpinBox *upOffset = new QDoubleSpinBox();
+        QDoubleSpinBox *downOffset = new QDoubleSpinBox();
+        QLineEdit *leftKey = new QLineEdit();
+        QLineEdit *rightKey = new QLineEdit();
+        QLineEdit *upKey = new QLineEdit();
+        QLineEdit *downKey = new QLineEdit();
+
+        leftOffset->setRange(0.0, 1.0);
+        rightOffset->setRange(0.0, 1.0);
+        upOffset->setRange(0.0, 1.0);
+        downOffset->setRange(0.0, 1.0);
+        leftOffset->setSingleStep(0.01);
+        rightOffset->setSingleStep(0.01);
+        upOffset->setSingleStep(0.01);
+        downOffset->setSingleStep(0.01);
+        leftOffset->setDecimals(3);
+        rightOffset->setDecimals(3);
+        upOffset->setDecimals(3);
+        downOffset->setDecimals(3);
+
+        leftOffset->setValue(0.1);
+        rightOffset->setValue(0.1);
+        upOffset->setValue(0.1);
+        downOffset->setValue(0.1);
+
+        leftKey->setPlaceholderText("e.g., Key_A");
+        rightKey->setPlaceholderText("e.g., Key_D");
+        upKey->setPlaceholderText("e.g., Key_W");
+        downKey->setPlaceholderText("e.g., Key_S");
+
+        formLayout->addRow("Left Offset:", leftOffset);
+        formLayout->addRow("Right Offset:", rightOffset);
+        formLayout->addRow("Up Offset:", upOffset);
+        formLayout->addRow("Down Offset:", downOffset);
+        formLayout->addRow("Left Key:", leftKey);
+        formLayout->addRow("Right Key:", rightKey);
+        formLayout->addRow("Up Key:", upKey);
+        formLayout->addRow("Down Key:", downKey);
+
+        m_typeSpecificWidgets["leftOffset"] = leftOffset;
+        m_typeSpecificWidgets["rightOffset"] = rightOffset;
+        m_typeSpecificWidgets["upOffset"] = upOffset;
+        m_typeSpecificWidgets["downOffset"] = downOffset;
+        m_typeSpecificWidgets["leftKey"] = leftKey;
+        m_typeSpecificWidgets["rightKey"] = rightKey;
+        m_typeSpecificWidgets["upKey"] = upKey;
+        m_typeSpecificWidgets["downKey"] = downKey;
+
+        // Load existing data
+        if (m_selectedWidget) {
+            QJsonObject data = m_selectedWidget->data();
+            if (data.contains("leftOffset")) leftOffset->setValue(data["leftOffset"].toDouble());
+            if (data.contains("rightOffset")) rightOffset->setValue(data["rightOffset"].toDouble());
+            if (data.contains("upOffset")) upOffset->setValue(data["upOffset"].toDouble());
+            if (data.contains("downOffset")) downOffset->setValue(data["downOffset"].toDouble());
+            if (data.contains("leftKey")) leftKey->setText(data["leftKey"].toString());
+            if (data.contains("rightKey")) rightKey->setText(data["rightKey"].toString());
+            if (data.contains("upKey")) upKey->setText(data["upKey"].toString());
+            if (data.contains("downKey")) downKey->setText(data["downKey"].toString());
+        }
+        break;
+    }
+    case KeyMapWidget::MT_DRAG: {
+        // Drag: startPos, endPos
+        QLineEdit *startX = new QLineEdit();
+        QLineEdit *startY = new QLineEdit();
+        QLineEdit *endX = new QLineEdit();
+        QLineEdit *endY = new QLineEdit();
+
+        startX->setPlaceholderText("0.0 - 1.0");
+        startY->setPlaceholderText("0.0 - 1.0");
+        endX->setPlaceholderText("0.0 - 1.0");
+        endY->setPlaceholderText("0.0 - 1.0");
+
+        formLayout->addRow("Start X:", startX);
+        formLayout->addRow("Start Y:", startY);
+        formLayout->addRow("End X:", endX);
+        formLayout->addRow("End Y:", endY);
+
+        m_typeSpecificWidgets["startX"] = startX;
+        m_typeSpecificWidgets["startY"] = startY;
+        m_typeSpecificWidgets["endX"] = endX;
+        m_typeSpecificWidgets["endY"] = endY;
+
+        // Load existing data
+        if (m_selectedWidget) {
+            QJsonObject data = m_selectedWidget->data();
+            if (data.contains("startPos") && data["startPos"].isObject()) {
+                QJsonObject startPos = data["startPos"].toObject();
+                startX->setText(QString::number(startPos["x"].toDouble(), 'f', 3));
+                startY->setText(QString::number(startPos["y"].toDouble(), 'f', 3));
+            }
+            if (data.contains("endPos") && data["endPos"].isObject()) {
+                QJsonObject endPos = data["endPos"].toObject();
+                endX->setText(QString::number(endPos["x"].toDouble(), 'f', 3));
+                endY->setText(QString::number(endPos["y"].toDouble(), 'f', 3));
+            }
+        }
+        break;
+    }
+    case KeyMapWidget::MT_MOUSE_MOVE: {
+        // Mouse Move: startPos, speedRatioX, speedRatioY
+        QLineEdit *startX = new QLineEdit();
+        QLineEdit *startY = new QLineEdit();
+        QDoubleSpinBox *speedRatioX = new QDoubleSpinBox();
+        QDoubleSpinBox *speedRatioY = new QDoubleSpinBox();
+
+        startX->setPlaceholderText("0.0 - 1.0");
+        startY->setPlaceholderText("0.0 - 1.0");
+        speedRatioX->setRange(0.0, 20.0);
+        speedRatioY->setRange(0.0, 20.0);
+        speedRatioX->setSingleStep(0.25);
+        speedRatioY->setSingleStep(0.25);
+        speedRatioX->setDecimals(2);
+        speedRatioY->setDecimals(2);
+        speedRatioX->setValue(1.0);
+        speedRatioY->setValue(1.0);
+
+        formLayout->addRow("Start X:", startX);
+        formLayout->addRow("Start Y:", startY);
+        formLayout->addRow("Speed Ratio X:", speedRatioX);
+        formLayout->addRow("Speed Ratio Y:", speedRatioY);
+
+        m_typeSpecificWidgets["startX"] = startX;
+        m_typeSpecificWidgets["startY"] = startY;
+        m_typeSpecificWidgets["speedRatioX"] = speedRatioX;
+        m_typeSpecificWidgets["speedRatioY"] = speedRatioY;
+
+        // Load existing data
+        if (m_selectedWidget) {
+            QJsonObject data = m_selectedWidget->data();
+            if (data.contains("startPos") && data["startPos"].isObject()) {
+                QJsonObject startPos = data["startPos"].toObject();
+                startX->setText(QString::number(startPos["x"].toDouble(), 'f', 3));
+                startY->setText(QString::number(startPos["y"].toDouble(), 'f', 3));
+            }
+            // speedRatioX and speedRatioY are separate values, not in an object
+            if (data.contains("speedRatioX")) {
+                speedRatioX->setValue(data["speedRatioX"].toDouble());
+            }
+            if (data.contains("speedRatioY")) {
+                speedRatioY->setValue(data["speedRatioY"].toDouble());
+            }
+        }
+        break;
+    }
+    case KeyMapWidget::MT_ANDROID_KEY: {
+        // Android Key: androidKey code
+        QSpinBox *androidKeyCode = new QSpinBox();
+        androidKeyCode->setRange(0, 999);
+        androidKeyCode->setValue(0);
+        formLayout->addRow("Android Key Code:", androidKeyCode);
+        m_typeSpecificWidgets["androidKey"] = androidKeyCode;
+
+        // Load existing data
+        if (m_selectedWidget && m_selectedWidget->data().contains("androidKey")) {
+            androidKeyCode->setValue(m_selectedWidget->data()["androidKey"].toInt());
+        }
+        break;
+    }
+    default:
+        break;
     }
 }
 
@@ -523,7 +906,11 @@ void KeyMapEditor::onPositionChanged()
         double x = m_posXEdit->text().toDouble(&okX);
         double y = m_posYEdit->text().toDouble(&okY);
         if (okX && okY) {
-            m_selectedWidget->setPosition(QPointF(x, y));
+            // Only update if position actually changed (avoid rounding errors causing jumps)
+            QPointF currentPos = m_selectedWidget->position();
+            if (qAbs(currentPos.x() - x) > 0.001 || qAbs(currentPos.y() - y) > 0.001) {
+                m_selectedWidget->setPosition(QPointF(x, y));
+            }
         }
     }
 }
@@ -542,7 +929,8 @@ void KeyMapEditor::onNewKeyMap()
 
 void KeyMapEditor::onLoadKeyMap()
 {
-    QString filePath = QFileDialog::getOpenFileName(this, "Load KeyMap", "./keymap", "JSON Files (*.json)");
+    QString defaultPath = QCoreApplication::applicationDirPath() + "/../../../keymap";
+    QString filePath = QFileDialog::getOpenFileName(this, "Load KeyMap", defaultPath, "JSON Files (*.json)");
     if (!filePath.isEmpty()) {
         loadKeyMap(filePath);
     }
@@ -559,7 +947,8 @@ void KeyMapEditor::onSaveKeyMap()
 
 void KeyMapEditor::onExportKeyMap()
 {
-    QString filePath = QFileDialog::getSaveFileName(this, "Export KeyMap", "./keymap", "JSON Files (*.json)");
+    QString defaultPath = QCoreApplication::applicationDirPath() + "/../../../keymap";
+    QString filePath = QFileDialog::getSaveFileName(this, "Export KeyMap", defaultPath, "JSON Files (*.json)");
     if (!filePath.isEmpty()) {
         saveKeyMap(filePath);
         m_currentFilePath = filePath;
@@ -752,6 +1141,17 @@ void KeyMapEditor::addKeyMapWidget(const QJsonObject &nodeData)
 
     connect(widget, &KeyMapWidget::selected, this, &KeyMapEditor::onKeyMapSelected);
     connect(widget, &KeyMapWidget::deleted, this, &KeyMapEditor::onDeleteKeyMap);
+    connect(widget, &KeyMapWidget::positionChanged, this, [this](const QPointF &pos) {
+        if (m_selectedWidget && sender() == m_selectedWidget) {
+            // Update position fields in real-time during drag
+            m_posXEdit->blockSignals(true);
+            m_posYEdit->blockSignals(true);
+            m_posXEdit->setText(QString::number(pos.x(), 'f', 3));
+            m_posYEdit->setText(QString::number(pos.y(), 'f', 3));
+            m_posXEdit->blockSignals(false);
+            m_posYEdit->blockSignals(false);
+        }
+    });
 
     m_keyMapWidgets.append(widget);
 

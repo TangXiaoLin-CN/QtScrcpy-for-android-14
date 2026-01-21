@@ -117,6 +117,8 @@ private:
     void addKeyMapWidget(const QJsonObject &nodeData);
     QJsonObject createKeyMapJson();
     void loadFromJson(const QJsonObject &rootObj);
+    void updateTypeSpecificProperties(KeyMapWidget::MapType type);
+    void clearTypeSpecificProperties();
 
     // UI Components
     QVBoxLayout *m_mainLayout;
@@ -154,6 +156,9 @@ private:
     // Additional property widgets for different types
     QWidget *m_additionalPropsWidget;
     QVBoxLayout *m_additionalPropsLayout;
+
+    // Type-specific property widgets
+    QMap<QString, QWidget*> m_typeSpecificWidgets;
 
     // Current selection
     KeyMapWidget *m_selectedWidget;
