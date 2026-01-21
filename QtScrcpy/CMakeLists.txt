@@ -376,6 +376,9 @@ endif()
 
 add_subdirectory(QtScrcpyCore)
 
+# Ensure QtScrcpy depends on QtScrcpyCore being built
+add_dependencies(${PROJECT_NAME} QtScrcpyCore)
+
 # Qt
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt${QT_VERSION_MAJOR}::Widgets
