@@ -1,6 +1,11 @@
 #include <QTcpSocket>
 #include <QHostAddress>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#include <QAudioSink>
+#include <QMediaDevices>
+#else
 #include <QAudioOutput>
+#endif
 #include <QTime>
 #include <QElapsedTimer>
 
@@ -103,6 +108,25 @@ void AudioOutput::startAudioOutput()
         return;
     }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    QAudioFormat format;
+    format.setSampleRate(48000);
+    format.setChannelCount(2);
+    format.setSampleFormat(QAudioFormat::Int16);
+
+    QAudioDevice info = QMediaDevices::defaultAudioOutput();
+    if (!info.isFormatSupported(format)) {
+        qWarning() << "AudioOutput::audio format not supported, cannot play audio.";
+        return;
+    }
+
+    m_audioOutput = new QAudioSink(info, format, this);
+    connect(m_audioOutput, &QAudioSink::stateChanged, this, [](QAudio::State state) {
+        qInfo() << "AudioOutput::audio state changed:" << state;
+    });
+    m_audioOutput->setBufferSize(48000*2*15/1000 * 20);
+    m_outputDevice = m_audioOutput->start();
+#else
     QAudioFormat format;
     format.setSampleRate(48000);
     format.setChannelCount(2);
@@ -123,6 +147,7 @@ void AudioOutput::startAudioOutput()
     });
     m_audioOutput->setBufferSize(48000*2*15/1000 * 20);
     m_outputDevice = m_audioOutput->start();
+#endif
 }
 
 void AudioOutput::stopAudioOutput()

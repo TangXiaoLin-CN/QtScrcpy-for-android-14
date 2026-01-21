@@ -3,6 +3,7 @@
 #include <QFileDialog>
 #include <QKeyEvent>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QTime>
 #include <QTimer>
 
@@ -611,9 +612,10 @@ void Dialog::on_usbConnectBtn_clicked()
 
 int Dialog::findDeviceFromeSerialBox(bool wifi)
 {
-    QRegExp regIP("\\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\:([0-9]|[1-9]\\d|[1-9]\\d{2}|[1-9]\\d{3}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])\\b");
+    QRegularExpression regIP("\\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\:([0-9]|[1-9]\\d|[1-9]\\d{2}|[1-9]\\d{3}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])\\b");
     for (int i = 0; i < ui->serialBox->count(); ++i) {
-        bool isWifi = regIP.exactMatch(ui->serialBox->itemText(i));
+        QRegularExpressionMatch match = regIP.match(ui->serialBox->itemText(i));
+        bool isWifi = match.hasMatch() && match.capturedStart() == 0 && match.capturedEnd() == ui->serialBox->itemText(i).length();
         bool found = wifi ? isWifi : !isWifi;
         if (found) {
             return i;

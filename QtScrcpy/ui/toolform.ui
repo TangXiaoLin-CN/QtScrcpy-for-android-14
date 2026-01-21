@@ -173,6 +173,16 @@
      </property>
     </widget>
    </item>
+   <item>
+    <widget class="QPushButton" name="keyMapBtn">
+     <property name="toolTip">
+      <string>keymap editor</string>
+     </property>
+     <property name="text">
+      <string/>
+     </property>
+    </widget>
+   </item>
   </layout>
  </widget>
  <resources/>

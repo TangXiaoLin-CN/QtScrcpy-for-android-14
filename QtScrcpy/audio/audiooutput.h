@@ -6,7 +6,12 @@
 #include <QPointer>
 #include <QVector>
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+class QAudioSink;
+#define QAudioOutput QAudioSink
+#else
 class QAudioOutput;
+#endif
 class QIODevice;
 class AudioOutput : public QObject
 {

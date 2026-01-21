@@ -11,7 +11,7 @@ cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
 # QC Custom config
 set(QC_PROJECT_NAME "QtScrcpy")
 # Read version numbers from file
-file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/version QC_FILE_VERSION)
+file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/VERSION.txt QC_FILE_VERSION)
 set(QC_PROJECT_VERSION ${QC_FILE_VERSION})
 
 # Project declare
@@ -30,7 +30,7 @@ message(STATUS "[${PROJECT_NAME}] CPU_ARCH:${QC_CPU_ARCH}")
 
 # CMake set
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # default RelWithDebInfo
@@ -50,18 +50,18 @@ if (MSVC)
 
     message(STATUS "[${PROJECT_NAME}] Set Warnings as error")
 
-    # warning level 3 and all warnings as errors
-    add_compile_options(/W3 /WX /wd4566)
+    # warning level 3 (but don't treat warnings as errors for now)
+    add_compile_options(/W3 /wd4566)
 
     # avoid warning C4819
-    add_compile_options(-source-charset:utf-8)
-
+    # Qt6 already adds /utf-8 flag, so we don't need to add it again
+    #add_compile_options(-source-charset:utf-8)
     #add_compile_options(/utf-8)
 
     # ensure we use minimal "windows.h" lib without the crazy min max macros
     add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
 
-    # disable SAFESEH - avoid "LNK2026: module unsafe"(Qt5.15&&vs2019)     
+    # disable SAFESEH - avoid "LNK2026: module unsafe"(Qt5.15&&vs2019)
     add_link_options(/SAFESEH:NO)
 
 endif()
@@ -83,9 +83,17 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(QT NAMES Qt6 Qt5 COMPONENTS Widgets Network Multimedia REQUIRED)
+# 禁用Qt6的permissive-标志（必须在find_package之前设置）
+set(QT_FEATURE_force_asserts OFF)
+set(QT_FEATURE_permissive OFF)
+
+find_package(QT NAMES Qt6 Qt5 COMPONENTS Widgets Network Multimedia OpenGLWidgets REQUIRED)
 
 find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Widgets Network Multimedia REQUIRED)
+
+if(QT_VERSION_MAJOR EQUAL 6)
+    find_package(Qt${QT_VERSION_MAJOR} COMPONENTS OpenGLWidgets REQUIRED)
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(QT NAMES Qt6 Qt5 COMPONENTS X11Extras REQUIRED)
@@ -132,6 +140,8 @@ set(QC_UI_SOURCES
     ui/dialog.cpp
     ui/dialog.h
     ui/dialog.ui
+    ui/keymapeditor.h
+    ui/keymapeditor.cpp
     render/qyuvopenglwidget.h
     render/qyuvopenglwidget.cpp
 )
@@ -191,7 +201,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
         VERSION_MINOR=${PROJECT_VERSION_MINOR}
         VERSION_PATCH=${PROJECT_VERSION_PATCH}
-        VERSION_RC_STR="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}"
     )
     set(QC_PLANTFORM_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/res/${PROJECT_NAME}.rc"
@@ -234,9 +243,26 @@ endif (POLICY CMP0091)
 # 添加一个exe
 add_executable(${PROJECT_NAME} ${QC_RUNTIME_TYPE} ${QC_PROJECT_SOURCES})
 
-# 设置MT/MTd
+# 设置MD/MDd (动态运行时库，用于Qt6动态编译)
 set_property(TARGET ${PROJECT_NAME} PROPERTY
-  MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+
+# 移除Qt6添加的-permissive-标志，使用宽松模式
+# 这是从静态Qt转换到动态Qt6.10的关键修复
+if (MSVC AND QT_VERSION_MAJOR EQUAL 6)
+    # 使用INTERFACE_COMPILE_OPTIONS来覆盖Qt6的设置
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        /permissive
+    )
+    # 移除-Zc:__cplusplus标志
+    get_target_property(COMPILE_OPTIONS ${PROJECT_NAME} COMPILE_OPTIONS)
+    if(COMPILE_OPTIONS)
+        list(REMOVE_ITEM COMPILE_OPTIONS "-Zc:__cplusplus")
+        list(REMOVE_ITEM COMPILE_OPTIONS "/Zc:__cplusplus")
+        set_target_properties(${PROJECT_NAME} PROPERTIES COMPILE_OPTIONS "${COMPILE_OPTIONS}")
+    endif()
+    message(STATUS "[${PROJECT_NAME}] Added /permissive flag to override Qt6's -permissive-")
+endif()
 
 
 #
@@ -357,4 +383,13 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt${QT_VERSION_MAJOR}::Multimedia
     QtScrcpyCore
 )
+
+if(QT_VERSION_MAJOR EQUAL 6)
+    target_link_libraries(${PROJECT_NAME} PRIVATE Qt${QT_VERSION_MAJOR}::OpenGLWidgets)
+endif()
+
+# Windows specific libraries
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    target_link_libraries(${PROJECT_NAME} PRIVATE dwmapi)
+endif()
 

@@ -13,6 +13,7 @@ namespace Ui
 }
 
 class Device;
+class KeyMapEditor;
 class ToolForm : public MagneticWidget
 {
     Q_OBJECT
@@ -47,6 +48,7 @@ private slots:
     void on_touchBtn_clicked();
     void on_groupControlBtn_clicked();
     void on_openScreenBtn_clicked();
+    void on_keyMapBtn_clicked();
 
 private:
     void initStyle();
@@ -58,6 +60,7 @@ private:
     QString m_serial;
     bool m_showTouch = false;
     bool m_isHost = false;
+    QPointer<KeyMapEditor> m_keyMapEditor;
 };
 
 #endif // TOOLFORM_H

@@ -7,6 +7,7 @@
 #include "toolform.h"
 #include "ui_toolform.h"
 #include "videoform.h"
+#include "keymapeditor.h"
 #include "../groupcontroller/groupcontroller.h"
 
 ToolForm::ToolForm(QWidget *adsorbWidget, AdsorbPositions adsorbPos) : MagneticWidget(adsorbWidget, adsorbPos), ui(new Ui::ToolForm)
@@ -52,6 +53,7 @@ void ToolForm::initStyle()
     IconHelper::Instance()->SetIcon(ui->screenShotBtn, QChar(0xf0c4), 15);
     IconHelper::Instance()->SetIcon(ui->touchBtn, QChar(0xf111), 15);
     IconHelper::Instance()->SetIcon(ui->groupControlBtn, QChar(0xf0c0), 15);
+    IconHelper::Instance()->SetIcon(ui->keyMapBtn, QChar(0xf11c), 15); // 键盘图标
 }
 
 void ToolForm::updateGroupControl()
@@ -222,4 +224,29 @@ void ToolForm::on_openScreenBtn_clicked()
         return;
     }
     device->setScreenPowerMode(true);
+}
+
+void ToolForm::on_keyMapBtn_clicked()
+{
+    if (!m_keyMapEditor) {
+        m_keyMapEditor = new KeyMapEditor(nullptr);
+
+        // 连接保存信号
+        connect(m_keyMapEditor, &KeyMapEditor::keyMapSaved, this, [this](const QString &filePath) {
+            qDebug() << "KeyMap saved to:" << filePath;
+            // TODO: 重新加载按键映射到设备
+        });
+    }
+
+    // 获取当前屏幕截图
+    VideoForm *videoForm = dynamic_cast<VideoForm*>(parent());
+    if (videoForm) {
+        QPixmap screenshot = videoForm->grab();
+        m_keyMapEditor->setPhoneScreenshot(screenshot);
+    }
+
+    // 显示编辑器
+    m_keyMapEditor->show();
+    m_keyMapEditor->raise();
+    m_keyMapEditor->activateWindow();
 }
