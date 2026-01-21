@@ -119,8 +119,7 @@ void QYUVOpenGLWidget::setFrameSize(const QSize &frameSize)
     if (m_frameSize != frameSize) {
         m_frameSize = frameSize;
         m_needUpdate = true;
-        // inittexture immediately
-        repaint();
+        update();
     }
 }
 
@@ -157,6 +156,8 @@ void QYUVOpenGLWidget::initializeGL()
 
 void QYUVOpenGLWidget::paintGL()
 {
+    glClear(GL_COLOR_BUFFER_BIT);
+
     if (m_needUpdate) {
         deInitTextures();
         initTextures();
@@ -164,6 +165,8 @@ void QYUVOpenGLWidget::paintGL()
     }
 
     if (m_textureInited) {
+        m_shaderProgram.bind();
+
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, m_texture[0]);
 
@@ -180,7 +183,7 @@ void QYUVOpenGLWidget::paintGL()
 void QYUVOpenGLWidget::resizeGL(int width, int height)
 {
     glViewport(0, 0, width, height);
-    repaint();
+    update();
 }
 
 void QYUVOpenGLWidget::initShader()
@@ -225,7 +228,7 @@ void QYUVOpenGLWidget::initTextures()
     // 设置st方向上纹理超出坐标时的显示策略
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, m_frameSize.width(), m_frameSize.height(), 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, m_frameSize.width(), m_frameSize.height(), 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
 
     glGenTextures(1, &m_texture[1]);
     glBindTexture(GL_TEXTURE_2D, m_texture[1]);
@@ -233,7 +236,7 @@ void QYUVOpenGLWidget::initTextures()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, m_frameSize.width() / 2, m_frameSize.height() / 2, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, m_frameSize.width() / 2, m_frameSize.height() / 2, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
 
     glGenTextures(1, &m_texture[2]);
     glBindTexture(GL_TEXTURE_2D, m_texture[2]);
@@ -243,15 +246,21 @@ void QYUVOpenGLWidget::initTextures()
     // 设置st方向上纹理超出坐标时的显示策略
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, m_frameSize.width() / 2, m_frameSize.height() / 2, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, m_frameSize.width() / 2, m_frameSize.height() / 2, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
 
     m_textureInited = true;
+
+    // Rebind VBO and shader program after texture initialization
+    m_vbo.bind();
+    m_shaderProgram.bind();
 }
 
 void QYUVOpenGLWidget::deInitTextures()
 {
-    if (QOpenGLFunctions::isInitialized(QOpenGLFunctions::d_ptr)) {
+    if (m_textureInited) {
+        makeCurrent();
         glDeleteTextures(3, m_texture);
+        doneCurrent();
     }
 
     memset(m_texture, 0, sizeof(m_texture));
@@ -268,6 +277,6 @@ void QYUVOpenGLWidget::updateTexture(GLuint texture, quint32 textureType, quint8
     makeCurrent();
     glBindTexture(GL_TEXTURE_2D, texture);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, static_cast<GLint>(stride));
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width(), size.height(), GL_LUMINANCE, GL_UNSIGNED_BYTE, pixels);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width(), size.height(), GL_RED, GL_UNSIGNED_BYTE, pixels);
     doneCurrent();
 }

@@ -87,12 +87,12 @@ set(CMAKE_AUTORCC ON)
 set(QT_FEATURE_force_asserts OFF)
 set(QT_FEATURE_permissive OFF)
 
-find_package(QT NAMES Qt6 Qt5 COMPONENTS Widgets Network Multimedia OpenGLWidgets REQUIRED)
+find_package(QT NAMES Qt6 Qt5 COMPONENTS Widgets Network Multimedia OpenGLWidgets OpenGL REQUIRED)
 
 find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Widgets Network Multimedia REQUIRED)
 
 if(QT_VERSION_MAJOR EQUAL 6)
-    find_package(Qt${QT_VERSION_MAJOR} COMPONENTS OpenGLWidgets REQUIRED)
+    find_package(Qt${QT_VERSION_MAJOR} COMPONENTS OpenGLWidgets OpenGL REQUIRED)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -385,7 +385,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 )
 
 if(QT_VERSION_MAJOR EQUAL 6)
-    target_link_libraries(${PROJECT_NAME} PRIVATE Qt${QT_VERSION_MAJOR}::OpenGLWidgets)
+    target_link_libraries(${PROJECT_NAME} PRIVATE Qt${QT_VERSION_MAJOR}::OpenGLWidgets Qt${QT_VERSION_MAJOR}::OpenGL)
 endif()
 
 # Windows specific libraries
