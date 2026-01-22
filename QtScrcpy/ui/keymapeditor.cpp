@@ -115,11 +115,9 @@ void KeyMapWidget::paintEvent(QPaintEvent *event)
 
 void KeyMapWidget::mousePressEvent(QMouseEvent *event)
 {
-    qDebug() << "KeyMapWidget::mousePressEvent" << this;
     if (event->button() == Qt::LeftButton) {
         m_dragStartPos = event->pos();
         m_selected = true;
-        qDebug() << "Emitting selected signal for" << this;
         emit selected(this);
         update();
     }
@@ -499,51 +497,38 @@ void KeyMapEditor::onDeleteKeyMap()
 
 void KeyMapEditor::onKeyMapSelected(KeyMapWidget *widget)
 {
-    qDebug() << "=== onKeyMapSelected START ===" << widget;
-
     // Prevent re-entry
     static bool isUpdating = false;
     if (isUpdating) {
-        qDebug() << "onKeyMapSelected: Already updating, returning";
         return;
     }
     isUpdating = true;
 
     // Deselect previous
     if (m_selectedWidget) {
-        qDebug() << "Deselecting previous widget:" << m_selectedWidget;
         m_selectedWidget->update();
     }
 
     m_selectedWidget = widget;
-    qDebug() << "Selected new widget:" << widget;
-
     updatePropertiesPanel();
 
     isUpdating = false;
-    qDebug() << "=== onKeyMapSelected END ===";
 }
 
 void KeyMapEditor::updatePropertiesPanel()
 {
-    qDebug() << ">>> updatePropertiesPanel START";
-
     // Prevent re-entry
     static bool isUpdating = false;
     if (isUpdating) {
-        qDebug() << "updatePropertiesPanel: Already updating, returning";
         return;
     }
     isUpdating = true;
 
     if (!m_selectedWidget) {
-        qDebug() << "No selected widget, clearing panel";
         clearPropertiesPanel();
         isUpdating = false;
         return;
     }
-
-    qDebug() << "Updating panel for widget:" << m_selectedWidget << "type:" << m_selectedWidget->mapType();
 
     // Block signals to prevent triggering change handlers
     m_typeCombo->blockSignals(true);
@@ -572,12 +557,10 @@ void KeyMapEditor::updatePropertiesPanel()
     m_posXEdit->blockSignals(false);
     m_posYEdit->blockSignals(false);
 
-    qDebug() << "Calling updateTypeSpecificProperties";
     // Update type-specific properties
     updateTypeSpecificProperties(m_selectedWidget->mapType());
 
     isUpdating = false;
-    qDebug() << ">>> updatePropertiesPanel END";
 }
 
 void KeyMapEditor::clearPropertiesPanel()
@@ -610,12 +593,9 @@ void KeyMapEditor::onTypeChanged(int index)
 
 void KeyMapEditor::clearTypeSpecificProperties()
 {
-    qDebug() << "    clearTypeSpecificProperties START, layout count:" << m_additionalPropsLayout->count();
-
     // Prevent re-entry
     static bool isClearing = false;
     if (isClearing) {
-        qDebug() << "    clearTypeSpecificProperties: Already clearing, returning";
         return;
     }
     isClearing = true;
@@ -624,34 +604,22 @@ void KeyMapEditor::clearTypeSpecificProperties()
     m_typeSpecificWidgets.clear();
 
     // Take all items from the layout
-    int itemCount = 0;
     while (m_additionalPropsLayout->count() > 0) {
-        itemCount++;
-        qDebug() << "    Removing item" << itemCount << "from layout";
-
         QLayoutItem *item = m_additionalPropsLayout->takeAt(0);
         if (!item) {
-            qDebug() << "    Item is null, breaking";
             break;
         }
 
         if (item->widget()) {
-            qDebug() << "    Item is a widget";
             QWidget *widget = item->widget();
             widget->setParent(nullptr);
             widget->deleteLater();
         } else if (item->layout()) {
-            qDebug() << "    Item is a layout with" << item->layout()->count() << "items";
             QLayout *layout = item->layout();
             // Recursively clear the nested layout
-            int subItemCount = 0;
             while (layout->count() > 0) {
-                subItemCount++;
-                qDebug() << "      Removing sub-item" << subItemCount;
-
                 QLayoutItem *subItem = layout->takeAt(0);
                 if (!subItem) {
-                    qDebug() << "      Sub-item is null, breaking";
                     break;
                 }
 
@@ -662,22 +630,17 @@ void KeyMapEditor::clearTypeSpecificProperties()
                 }
                 delete subItem;
             }
-            qDebug() << "    Scheduling layout for deletion";
             // Don't delete layout immediately - let Qt handle it
             layout->setParent(nullptr);
-            // We can't use deleteLater on QLayout, so we just leave it orphaned
-            // Qt will clean it up when the parent widget is destroyed
         }
         delete item;
     }
 
     isClearing = false;
-    qDebug() << "    clearTypeSpecificProperties END";
 }
 
 void KeyMapEditor::updateTypeSpecificProperties(KeyMapWidget::MapType type)
 {
-    qDebug() << "  updateTypeSpecificProperties START, type:" << type;
     clearTypeSpecificProperties();
 
     QFormLayout *formLayout = new QFormLayout();
