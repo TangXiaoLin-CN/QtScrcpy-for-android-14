@@ -63,6 +63,44 @@ REM Create package directory
 echo Creating package directory...
 mkdir "%PACKAGE_DIR%"
 
+REM Build android-mouse-cursor APK
+echo.
+echo ============================================================================
+echo Building android-mouse-cursor APK...
+echo ============================================================================
+set ANDROID_PROJECT_DIR=%SCRIPT_DIR%..\android-mouse-cursor
+if exist "%ANDROID_PROJECT_DIR%\gradlew.bat" (
+    pushd "%ANDROID_PROJECT_DIR%"
+
+    REM Set JAVA_HOME if not already set
+    if not defined JAVA_HOME (
+        if exist "D:\software\AndroidStudio\jbr\bin\java.exe" (
+            set "JAVA_HOME=D:\software\AndroidStudio\jbr"
+            echo Using Java from: !JAVA_HOME!
+        )
+    )
+
+    echo Cleaning previous build...
+    call gradlew.bat clean >nul 2>&1
+    echo Building release APK...
+    call gradlew.bat assembleRelease
+    if errorlevel 1 (
+        echo Warning: Android APK build failed, will use existing APK if available
+    ) else (
+        echo Android APK built successfully
+        REM Copy the newly built APK to output directory
+        if exist "app\build\outputs\apk\release\app-release-unsigned.apk" (
+            copy "app\build\outputs\apk\release\app-release-unsigned.apk" "%OUTPUT_DIR%\vmouse.apk" >nul
+            echo APK copied to output directory as vmouse.apk
+        )
+    )
+    popd
+) else (
+    echo Warning: android-mouse-cursor project not found at %ANDROID_PROJECT_DIR%
+    echo Will use existing APK if available
+)
+echo.
+
 REM Copy main executable
 echo Copying QtScrcpy.exe...
 copy "%OUTPUT_DIR%\QtScrcpy.exe" "%PACKAGE_DIR%\" >nul
