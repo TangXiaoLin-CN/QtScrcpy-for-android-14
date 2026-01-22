@@ -109,7 +109,10 @@ if exist "%ANDROID_PROJECT_DIR%\gradlew.bat" (
     ) else (
         echo Android APK built successfully
         REM Copy the newly built APK to output directory
-        if exist "app\build\outputs\apk\release\app-release-unsigned.apk" (
+        if exist "app\build\outputs\apk\release\app-release.apk" (
+            copy "app\build\outputs\apk\release\app-release.apk" "%OUTPUT_DIR%\vmouse.apk" >nul
+            echo APK copied to output directory as vmouse.apk
+        ) else if exist "app\build\outputs\apk\release\app-release-unsigned.apk" (
             copy "app\build\outputs\apk\release\app-release-unsigned.apk" "%OUTPUT_DIR%\vmouse.apk" >nul
             echo APK copied to output directory as vmouse.apk
         )
