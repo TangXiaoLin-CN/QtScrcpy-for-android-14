@@ -27,12 +27,19 @@ REM Try to auto-detect build directory
 set BUILD_DIR=
 if exist "%SCRIPT_DIR%build\Desktop_Qt_6_10_0_MinGW_64_bit-Release\CMakeCache.txt" (
     set BUILD_DIR=%SCRIPT_DIR%build\Desktop_Qt_6_10_0_MinGW_64_bit-Release
-) else if exist "%SCRIPT_DIR%build\Desktop_Qt_6_10_0_MinGW_64_bit-Debug\CMakeCache.txt" (
-    set BUILD_DIR=%SCRIPT_DIR%build\Desktop_Qt_6_10_0_MinGW_64_bit-Debug
-    set BUILD_TYPE=Debug
-    set OUTPUT_DIR=%SCRIPT_DIR%output\%CPU_ARCH%\Debug
-    set PACKAGE_DIR=%SCRIPT_DIR%QtScrcpy-Debug
-    echo Note: Using Debug build as Release build not found
+) else (
+    echo Error: Release build directory not found!
+    echo Expected: %SCRIPT_DIR%build\Desktop_Qt_6_10_0_MinGW_64_bit-Release
+    echo.
+    echo Please build the Release version first:
+    echo 1. Open Qt Creator
+    echo 2. Select "Release" build configuration
+    echo 3. Build the project
+    echo.
+    echo Or use package.bat to package the Debug version instead.
+    echo.
+    pause
+    exit /b 1
 )
 
 REM Check if build output exists
