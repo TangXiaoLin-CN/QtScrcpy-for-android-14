@@ -16,6 +16,119 @@
 #include <QCoreApplication>
 
 // ============================================================================
+// ClickMultiSubNode Implementation
+// ============================================================================
+
+ClickMultiSubNode::ClickMultiSubNode(int index, KeyMapWidget *parent, KeyMapEditor *editor)
+    : QWidget(parent->parentWidget())
+    , m_index(index)
+    , m_position(0.5, 0.5)
+    , m_parentWidget(parent)
+    , m_editor(editor)
+    , m_dragging(false)
+    , m_screenSize(100, 100)
+{
+    setFixedSize(60, 60); // Same size as main nodes
+    setAttribute(Qt::WA_TranslucentBackground);
+    setMouseTracking(true);
+}
+
+void ClickMultiSubNode::setPosition(const QPointF &pos)
+{
+    m_position = pos;
+    if (m_screenSize.width() > 0 && m_screenSize.height() > 0) {
+        int x = static_cast<int>(pos.x() * m_screenSize.width()) - width() / 2;
+        int y = static_cast<int>(pos.y() * m_screenSize.height()) - height() / 2;
+        move(x, y);
+    }
+}
+
+void ClickMultiSubNode::updateScreenSize(const QSize &screenSize)
+{
+    m_screenSize = screenSize;
+    setPosition(m_position);
+}
+
+void ClickMultiSubNode::paintEvent(QPaintEvent *event)
+{
+    Q_UNUSED(event);
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    // Draw same style as parent widget
+    QColor bgColor = QColor(241, 196, 15, 200); // Yellow for Click Multi
+    painter.setBrush(QBrush(bgColor));
+
+    if (m_parentWidget->isSelected()) {
+        // Thick red border when parent is selected
+        painter.setPen(QPen(QColor(255, 0, 0), 5));
+    } else {
+        painter.setPen(QPen(Qt::white, 2));
+    }
+
+    painter.drawEllipse(rect().adjusted(5, 5, -5, -5));
+
+    // Draw type icon (same as Click Multi)
+    painter.setPen(Qt::white);
+    QFont font = painter.font();
+    font.setPointSize(10);
+    font.setBold(true);
+    painter.setFont(font);
+    painter.drawText(rect(), Qt::AlignCenter, "⊕");
+
+    // Draw key binding with index - e.g., "F1 (1)"
+    QString keyBinding = m_parentWidget->keyBinding();
+    if (!keyBinding.isEmpty()) {
+        font.setPointSize(8);
+        font.setBold(false);
+        painter.setFont(font);
+        QString displayKey = keyBinding;
+        displayKey.replace("Key_", "");
+        displayKey.replace("Button", "");
+        displayKey += QString(" (%1)").arg(m_index + 1);
+        painter.drawText(rect().adjusted(0, 35, 0, 0), Qt::AlignHCenter | Qt::AlignTop, displayKey);
+    }
+}
+
+void ClickMultiSubNode::mousePressEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton) {
+        m_dragStartPos = event->pos();
+        emit selected(this);
+        update();
+    }
+}
+
+void ClickMultiSubNode::mouseMoveEvent(QMouseEvent *event)
+{
+    if (event->buttons() & Qt::LeftButton) {
+        if (!m_dragging && (event->pos() - m_dragStartPos).manhattanLength() > 5) {
+            m_dragging = true;
+        }
+
+        if (m_dragging) {
+            QPoint newPos = mapToParent(event->pos()) - QPoint(width() / 2, height() / 2);
+            newPos.setX(qBound(0, newPos.x(), m_screenSize.width() - width()));
+            newPos.setY(qBound(0, newPos.y(), m_screenSize.height() - height()));
+
+            double x = static_cast<double>(newPos.x() + width() / 2) / m_screenSize.width();
+            double y = static_cast<double>(newPos.y() + height() / 2) / m_screenSize.height();
+            m_position = QPointF(x, y);
+            move(newPos);
+
+            emit positionChanged(m_position);
+        }
+    }
+}
+
+void ClickMultiSubNode::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton) {
+        m_dragging = false;
+    }
+}
+
+// ============================================================================
 // KeyMapWidget Implementation
 // ============================================================================
 
@@ -29,6 +142,19 @@ KeyMapWidget::KeyMapWidget(QWidget *parent)
     setFixedSize(60, 60);
     setAttribute(Qt::WA_TranslucentBackground);
     setMouseTracking(true);
+}
+
+KeyMapWidget::~KeyMapWidget()
+{
+    clearSubNodes();
+}
+
+void KeyMapWidget::clearSubNodes()
+{
+    for (auto *node : m_subNodes) {
+        node->deleteLater();
+    }
+    m_subNodes.clear();
 }
 
 void KeyMapWidget::setPosition(const QPointF &pos)
@@ -78,12 +204,14 @@ void KeyMapWidget::paintEvent(QPaintEvent *event)
 
     // Draw background circle
     QColor bgColor = getTypeColor();
-    if (m_selected) {
-        bgColor = bgColor.lighter(120);
-    }
 
     painter.setBrush(QBrush(bgColor));
-    painter.setPen(QPen(Qt::white, 2));
+    if (m_selected) {
+        // Much more visible selection - thick red border
+        painter.setPen(QPen(QColor(255, 0, 0), 5));
+    } else {
+        painter.setPen(QPen(Qt::white, 2));
+    }
     painter.drawEllipse(rect().adjusted(5, 5, -5, -5));
 
     // Draw type icon
@@ -228,6 +356,7 @@ QColor KeyMapWidget::getTypeColor() const
 KeyMapEditor::KeyMapEditor(QWidget *parent)
     : QWidget(parent)
     , m_selectedWidget(nullptr)
+    , m_selectedSubNode(nullptr)
     , m_switchKey("Key_QuoteLeft")
 {
     setupUI();
@@ -362,9 +491,40 @@ void KeyMapEditor::setupPropertiesPanel()
     m_propertiesLayout->addWidget(m_keyMapList);
 
     connect(m_keyMapList, &QListWidget::currentRowChanged, this, [this](int row) {
-        if (row >= 0 && row < m_keyMapWidgets.size()) {
-            onKeyMapSelected(m_keyMapWidgets[row]);
+        // Prevent re-entry
+        static bool isUpdating = false;
+        if (isUpdating) {
+            return;
         }
+        isUpdating = true;
+
+        if (row >= 0 && row < m_keyMapWidgets.size()) {
+            KeyMapWidget *widget = m_keyMapWidgets[row];
+
+            // Deselect previous
+            if (m_selectedWidget && m_selectedWidget != widget) {
+                m_selectedWidget->setSelected(false);
+                m_selectedWidget->update();
+                // Update Click Multi sub-nodes
+                for (auto *subNode : m_selectedWidget->subNodes()) {
+                    subNode->update();
+                }
+            }
+
+            m_selectedWidget = widget;
+            if (m_selectedWidget) {
+                m_selectedWidget->setSelected(true);
+                m_selectedWidget->update();
+                // Update Click Multi sub-nodes
+                for (auto *subNode : m_selectedWidget->subNodes()) {
+                    subNode->update();
+                }
+            }
+
+            updatePropertiesPanel();
+        }
+
+        isUpdating = false;
     });
 
     // Properties editor
@@ -489,6 +649,8 @@ void KeyMapEditor::onDeleteKeyMap()
             }
         }
 
+        // Clear sub-nodes before deleting widget
+        m_selectedWidget->clearSubNodes();
         m_selectedWidget->deleteLater();
         m_selectedWidget = nullptr;
         clearPropertiesPanel();
@@ -505,11 +667,33 @@ void KeyMapEditor::onKeyMapSelected(KeyMapWidget *widget)
     isUpdating = true;
 
     // Deselect previous
-    if (m_selectedWidget) {
+    if (m_selectedWidget && m_selectedWidget != widget) {
+        m_selectedWidget->setSelected(false);
         m_selectedWidget->update();
+        // Update Click Multi sub-nodes
+        for (auto *subNode : m_selectedWidget->subNodes()) {
+            subNode->update();
+        }
     }
 
     m_selectedWidget = widget;
+    if (m_selectedWidget) {
+        m_selectedWidget->setSelected(true);
+        m_selectedWidget->update();
+        // Update Click Multi sub-nodes
+        for (auto *subNode : m_selectedWidget->subNodes()) {
+            subNode->update();
+        }
+
+        // Sync list selection - block signals to prevent re-entry
+        int index = m_keyMapWidgets.indexOf(widget);
+        if (index >= 0 && m_keyMapList->currentRow() != index) {
+            m_keyMapList->blockSignals(true);
+            m_keyMapList->setCurrentRow(index);
+            m_keyMapList->blockSignals(false);
+        }
+    }
+
     updatePropertiesPanel();
 
     isUpdating = false;
@@ -663,6 +847,22 @@ void KeyMapEditor::updateTypeSpecificProperties(KeyMapWidget::MapType type)
         if (m_selectedWidget && m_selectedWidget->data().contains("resetMap")) {
             resetMapCheck->setChecked(m_selectedWidget->data()["resetMap"].toBool());
         }
+
+        // Connect to update data
+        connect(switchMapCheck, &QCheckBox::toggled, this, [this](bool checked) {
+            if (m_selectedWidget) {
+                QJsonObject data = m_selectedWidget->data();
+                data["switchMap"] = checked;
+                m_selectedWidget->setData(data);
+            }
+        });
+        connect(resetMapCheck, &QCheckBox::toggled, this, [this](bool checked) {
+            if (m_selectedWidget) {
+                QJsonObject data = m_selectedWidget->data();
+                data["resetMap"] = checked;
+                m_selectedWidget->setData(data);
+            }
+        });
         break;
     }
     case KeyMapWidget::MT_CLICK_TWICE: {
@@ -673,10 +873,278 @@ void KeyMapEditor::updateTypeSpecificProperties(KeyMapWidget::MapType type)
         break;
     }
     case KeyMapWidget::MT_CLICK_MULTI: {
-        // Click Multi: multiple click positions
-        QLabel *infoLabel = new QLabel("Multiple click positions (TODO: Add UI for multiple positions)");
+        // Click Multi: node list and add button, edit selected sub-node
+        QLabel *infoLabel = new QLabel("Click Multi - Click nodes:");
         infoLabel->setWordWrap(true);
         formLayout->addRow(infoLabel);
+
+        // List of click nodes
+        QListWidget *clickNodesList = new QListWidget();
+        clickNodesList->setMaximumHeight(200);
+        formLayout->addRow("Nodes:", clickNodesList);
+        m_typeSpecificWidgets["clickNodesList"] = clickNodesList;
+
+        // Add button
+        QPushButton *addBtn = new QPushButton("Add Click Node");
+        formLayout->addRow(addBtn);
+
+        // Load existing click nodes
+        if (m_selectedWidget && m_selectedWidget->data().contains("clickNodes")) {
+            QJsonArray clickNodes = m_selectedWidget->data()["clickNodes"].toArray();
+            for (int i = 0; i < clickNodes.size(); ++i) {
+                QString text = QString("Node %1").arg(i + 1);
+                clickNodesList->addItem(text);
+            }
+        }
+
+        // Sub-node properties (shown when a sub-node is selected)
+        QGroupBox *subNodeGroup = new QGroupBox("Selected Node Properties");
+        QFormLayout *subNodeLayout = new QFormLayout(subNodeGroup);
+        formLayout->addRow(subNodeGroup);
+        m_typeSpecificWidgets["subNodeGroup"] = subNodeGroup;
+
+        QLineEdit *delayEdit = new QLineEdit();
+        delayEdit->setPlaceholderText("Delay in milliseconds");
+        subNodeLayout->addRow("Delay (ms):", delayEdit);
+        m_typeSpecificWidgets["delayEdit"] = delayEdit;
+
+        QLineEdit *posXEdit = new QLineEdit();
+        QLineEdit *posYEdit = new QLineEdit();
+        posXEdit->setPlaceholderText("0.0 - 1.0");
+        posYEdit->setPlaceholderText("0.0 - 1.0");
+        subNodeLayout->addRow("Position X:", posXEdit);
+        subNodeLayout->addRow("Position Y:", posYEdit);
+        m_typeSpecificWidgets["subPosXEdit"] = posXEdit;
+        m_typeSpecificWidgets["subPosYEdit"] = posYEdit;
+
+        QPushButton *removeBtn = new QPushButton("Remove This Node");
+        removeBtn->setStyleSheet("QPushButton { background-color: #e74c3c; color: white; }");
+        subNodeLayout->addRow(removeBtn);
+        m_typeSpecificWidgets["removeBtn"] = removeBtn;
+
+        subNodeGroup->setVisible(false); // Hidden until a sub-node is selected
+
+        // Connect list selection to show sub-node properties
+        connect(clickNodesList, &QListWidget::currentRowChanged, this, [this, clickNodesList, subNodeGroup, delayEdit, posXEdit, posYEdit](int row) {
+            if (row >= 0 && m_selectedWidget) {
+                QJsonObject data = m_selectedWidget->data();
+                if (data.contains("clickNodes")) {
+                    QJsonArray clickNodes = data["clickNodes"].toArray();
+                    if (row < clickNodes.size()) {
+                        QJsonObject node = clickNodes[row].toObject();
+
+                        // Show properties
+                        subNodeGroup->setVisible(true);
+                        delayEdit->setText(QString::number(node["delay"].toInt(0)));
+
+                        QJsonObject pos = node["pos"].toObject();
+                        posXEdit->setText(QString::number(pos["x"].toDouble(0.5), 'f', 3));
+                        posYEdit->setText(QString::number(pos["y"].toDouble(0.5), 'f', 3));
+
+                        // Select the visual sub-node
+                        auto subNodes = m_selectedWidget->subNodes();
+                        if (row < subNodes.size()) {
+                            m_selectedSubNode = subNodes[row];
+                        }
+                    }
+                }
+            } else {
+                subNodeGroup->setVisible(false);
+                m_selectedSubNode = nullptr;
+            }
+        });
+
+        // Connect delay edit
+        connect(delayEdit, &QLineEdit::textChanged, this, [this, clickNodesList](const QString &text) {
+            if (m_selectedWidget && clickNodesList->currentRow() >= 0) {
+                int row = clickNodesList->currentRow();
+                QJsonObject data = m_selectedWidget->data();
+                if (data.contains("clickNodes")) {
+                    QJsonArray clickNodes = data["clickNodes"].toArray();
+                    if (row < clickNodes.size()) {
+                        QJsonObject node = clickNodes[row].toObject();
+                        node["delay"] = text.toInt();
+                        clickNodes[row] = node;
+                        data["clickNodes"] = clickNodes;
+                        m_selectedWidget->setData(data);
+                    }
+                }
+            }
+        });
+
+        // Connect position edits
+        connect(posXEdit, &QLineEdit::textChanged, this, [this, clickNodesList, posYEdit](const QString &text) {
+            if (m_selectedWidget && clickNodesList->currentRow() >= 0) {
+                int row = clickNodesList->currentRow();
+                bool ok;
+                double x = text.toDouble(&ok);
+                if (ok) {
+                    QJsonObject data = m_selectedWidget->data();
+                    if (data.contains("clickNodes")) {
+                        QJsonArray clickNodes = data["clickNodes"].toArray();
+                        if (row < clickNodes.size()) {
+                            QJsonObject node = clickNodes[row].toObject();
+                            QJsonObject pos = node["pos"].toObject();
+                            pos["x"] = x;
+                            node["pos"] = pos;
+                            clickNodes[row] = node;
+                            data["clickNodes"] = clickNodes;
+                            m_selectedWidget->setData(data);
+
+                            // Update visual position
+                            auto subNodes = m_selectedWidget->subNodes();
+                            if (row < subNodes.size()) {
+                                double y = posYEdit->text().toDouble();
+                                subNodes[row]->setPosition(QPointF(x, y));
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        connect(posYEdit, &QLineEdit::textChanged, this, [this, clickNodesList, posXEdit](const QString &text) {
+            if (m_selectedWidget && clickNodesList->currentRow() >= 0) {
+                int row = clickNodesList->currentRow();
+                bool ok;
+                double y = text.toDouble(&ok);
+                if (ok) {
+                    QJsonObject data = m_selectedWidget->data();
+                    if (data.contains("clickNodes")) {
+                        QJsonArray clickNodes = data["clickNodes"].toArray();
+                        if (row < clickNodes.size()) {
+                            QJsonObject node = clickNodes[row].toObject();
+                            QJsonObject pos = node["pos"].toObject();
+                            pos["y"] = y;
+                            node["pos"] = pos;
+                            clickNodes[row] = node;
+                            data["clickNodes"] = clickNodes;
+                            m_selectedWidget->setData(data);
+
+                            // Update visual position
+                            auto subNodes = m_selectedWidget->subNodes();
+                            if (row < subNodes.size()) {
+                                double x = posXEdit->text().toDouble();
+                                subNodes[row]->setPosition(QPointF(x, y));
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Add node button handler
+        connect(addBtn, &QPushButton::clicked, this, [this, clickNodesList]() {
+            if (!m_selectedWidget) return;
+
+            QJsonObject data = m_selectedWidget->data();
+            QJsonArray clickNodes = data.contains("clickNodes") ? data["clickNodes"].toArray() : QJsonArray();
+
+            // Add new node at center
+            QJsonObject newNode;
+            newNode["delay"] = 0;
+            QJsonObject pos;
+            pos["x"] = 0.5;
+            pos["y"] = 0.5;
+            newNode["pos"] = pos;
+            clickNodes.append(newNode);
+            data["clickNodes"] = clickNodes;
+            m_selectedWidget->setData(data);
+
+            // Create visual sub-node
+            int index = clickNodes.size() - 1;
+            ClickMultiSubNode *subNode = new ClickMultiSubNode(index, m_selectedWidget, this);
+            subNode->setPosition(QPointF(0.5, 0.5));
+            subNode->updateScreenSize(m_phoneScreenshot.size());
+            subNode->show();
+            m_selectedWidget->addSubNode(subNode);
+
+            connect(subNode, &ClickMultiSubNode::selected, this, [this, clickNodesList](ClickMultiSubNode *node) {
+                onKeyMapSelected(node->parentWidget());
+                clickNodesList->setCurrentRow(node->index());
+            });
+
+            connect(subNode, &ClickMultiSubNode::positionChanged, this, [this, index](const QPointF &pos) {
+                QJsonObject data = m_selectedWidget->data();
+                if (data.contains("clickNodes")) {
+                    QJsonArray clickNodes = data["clickNodes"].toArray();
+                    if (index < clickNodes.size()) {
+                        QJsonObject clickNode = clickNodes[index].toObject();
+                        QJsonObject posObj;
+                        posObj["x"] = pos.x();
+                        posObj["y"] = pos.y();
+                        clickNode["pos"] = posObj;
+                        clickNodes[index] = clickNode;
+                        data["clickNodes"] = clickNodes;
+                        m_selectedWidget->setData(data);
+                    }
+                }
+            });
+
+            // Update list
+            QString text = QString("Node %1").arg(index + 1);
+            clickNodesList->addItem(text);
+        });
+
+        // Remove node button handler
+        connect(removeBtn, &QPushButton::clicked, this, [this, clickNodesList, subNodeGroup]() {
+            if (!m_selectedWidget || clickNodesList->currentRow() < 0) return;
+
+            int row = clickNodesList->currentRow();
+            QJsonObject data = m_selectedWidget->data();
+            if (!data.contains("clickNodes")) return;
+
+            QJsonArray clickNodes = data["clickNodes"].toArray();
+            if (row >= clickNodes.size()) return;
+
+            // Remove node
+            clickNodes.removeAt(row);
+            data["clickNodes"] = clickNodes;
+            m_selectedWidget->setData(data);
+
+            // Remove visual sub-node
+            auto subNodes = m_selectedWidget->subNodes();
+            if (row < subNodes.size()) {
+                ClickMultiSubNode *node = subNodes[row];
+                m_selectedWidget->subNodes().removeAt(row);
+                node->deleteLater();
+
+                // Update indices of remaining nodes
+                for (int i = row; i < m_selectedWidget->subNodes().size(); ++i) {
+                    // Need to recreate nodes with correct indices
+                }
+            }
+
+            // Update list
+            delete clickNodesList->takeItem(row);
+
+            // Renumber remaining items
+            for (int i = 0; i < clickNodesList->count(); ++i) {
+                clickNodesList->item(i)->setText(QString("Node %1").arg(i + 1));
+            }
+
+            subNodeGroup->setVisible(false);
+            m_selectedSubNode = nullptr;
+        });
+
+        // resetMap checkbox
+        QCheckBox *resetMapCheck = new QCheckBox();
+        formLayout->addRow("Reset Map:", resetMapCheck);
+        m_typeSpecificWidgets["resetMap"] = resetMapCheck;
+
+        if (m_selectedWidget && m_selectedWidget->data().contains("resetMap")) {
+            resetMapCheck->setChecked(m_selectedWidget->data()["resetMap"].toBool());
+        }
+
+        // Connect to update data
+        connect(resetMapCheck, &QCheckBox::toggled, this, [this](bool checked) {
+            if (m_selectedWidget) {
+                QJsonObject data = m_selectedWidget->data();
+                data["resetMap"] = checked;
+                m_selectedWidget->setData(data);
+            }
+        });
+
         break;
     }
     case KeyMapWidget::MT_STEER_WHEEL: {
@@ -743,6 +1211,65 @@ void KeyMapEditor::updateTypeSpecificProperties(KeyMapWidget::MapType type)
             if (data.contains("upKey")) upKey->setText(data["upKey"].toString());
             if (data.contains("downKey")) downKey->setText(data["downKey"].toString());
         }
+
+        // Connect to update data
+        connect(leftOffset, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+            if (m_selectedWidget) {
+                QJsonObject data = m_selectedWidget->data();
+                data["leftOffset"] = value;
+                m_selectedWidget->setData(data);
+            }
+        });
+        connect(rightOffset, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+            if (m_selectedWidget) {
+                QJsonObject data = m_selectedWidget->data();
+                data["rightOffset"] = value;
+                m_selectedWidget->setData(data);
+            }
+        });
+        connect(upOffset, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+            if (m_selectedWidget) {
+                QJsonObject data = m_selectedWidget->data();
+                data["upOffset"] = value;
+                m_selectedWidget->setData(data);
+            }
+        });
+        connect(downOffset, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+            if (m_selectedWidget) {
+                QJsonObject data = m_selectedWidget->data();
+                data["downOffset"] = value;
+                m_selectedWidget->setData(data);
+            }
+        });
+        connect(leftKey, &QLineEdit::textChanged, this, [this](const QString &text) {
+            if (m_selectedWidget) {
+                QJsonObject data = m_selectedWidget->data();
+                data["leftKey"] = text;
+                m_selectedWidget->setData(data);
+            }
+        });
+        connect(rightKey, &QLineEdit::textChanged, this, [this](const QString &text) {
+            if (m_selectedWidget) {
+                QJsonObject data = m_selectedWidget->data();
+                data["rightKey"] = text;
+                m_selectedWidget->setData(data);
+            }
+        });
+        connect(upKey, &QLineEdit::textChanged, this, [this](const QString &text) {
+            if (m_selectedWidget) {
+                QJsonObject data = m_selectedWidget->data();
+                data["upKey"] = text;
+                m_selectedWidget->setData(data);
+            }
+        });
+        connect(downKey, &QLineEdit::textChanged, this, [this](const QString &text) {
+            if (m_selectedWidget) {
+                QJsonObject data = m_selectedWidget->data();
+                data["downKey"] = text;
+                m_selectedWidget->setData(data);
+            }
+        });
+
         break;
     }
     case KeyMapWidget::MT_DRAG: {
@@ -892,7 +1419,7 @@ void KeyMapEditor::onNewKeyMap()
 
 void KeyMapEditor::onLoadKeyMap()
 {
-    QString defaultPath = QCoreApplication::applicationDirPath() + "/../../../keymap";
+    QString defaultPath = QCoreApplication::applicationDirPath() + "/keymap";
     QString filePath = QFileDialog::getOpenFileName(this, "Load KeyMap", defaultPath, "JSON Files (*.json)");
     if (!filePath.isEmpty()) {
         loadKeyMap(filePath);
@@ -910,7 +1437,7 @@ void KeyMapEditor::onSaveKeyMap()
 
 void KeyMapEditor::onExportKeyMap()
 {
-    QString defaultPath = QCoreApplication::applicationDirPath() + "/../../../keymap";
+    QString defaultPath = QCoreApplication::applicationDirPath() + "/keymap";
     QString filePath = QFileDialog::getSaveFileName(this, "Export KeyMap", defaultPath, "JSON Files (*.json)");
     if (!filePath.isEmpty()) {
         saveKeyMap(filePath);
@@ -997,40 +1524,47 @@ QJsonObject KeyMapEditor::createKeyMapJson()
     // Key map nodes
     QJsonArray nodesArray;
     for (KeyMapWidget *widget : m_keyMapWidgets) {
-        QJsonObject node;
+        // Start with the original data to preserve all fields
+        QJsonObject node = widget->data();
+
+        // Update the fields that may have been modified in the editor
         node["comment"] = widget->comment();
         node["key"] = widget->keyBinding();
 
+        // Update position
         QJsonObject pos;
         pos["x"] = widget->position().x();
         pos["y"] = widget->position().y();
-        node["pos"] = pos;
 
-        // Type
+        // Check if this is a steer wheel (uses centerPos instead of pos)
+        if (widget->mapType() == KeyMapWidget::MT_STEER_WHEEL) {
+            node["centerPos"] = pos;
+        } else {
+            node["pos"] = pos;
+        }
+
+        // Update type string
         switch (widget->mapType()) {
         case KeyMapWidget::MT_CLICK:
             node["type"] = "KMT_CLICK";
-            node["switchMap"] = false;
-            node["resetMap"] = false;
             break;
         case KeyMapWidget::MT_CLICK_TWICE:
             node["type"] = "KMT_CLICK_TWICE";
             break;
         case KeyMapWidget::MT_CLICK_MULTI:
             node["type"] = "KMT_CLICK_MULTI";
-            node["clickNodes"] = QJsonArray(); // TODO: Add support for multiple clicks
             break;
         case KeyMapWidget::MT_STEER_WHEEL:
             node["type"] = "KMT_STEER_WHEEL";
-            // TODO: Add steer wheel specific properties
             break;
         case KeyMapWidget::MT_DRAG:
             node["type"] = "KMT_DRAG";
-            // TODO: Add drag specific properties
+            break;
+        case KeyMapWidget::MT_MOUSE_MOVE:
+            node["type"] = "KMT_MOUSE_MOVE";
             break;
         case KeyMapWidget::MT_ANDROID_KEY:
             node["type"] = "KMT_ANDROID_KEY";
-            node["androidKey"] = 0; // TODO: Add android key code
             break;
         default:
             continue;
@@ -1101,6 +1635,49 @@ void KeyMapEditor::addKeyMapWidget(const QJsonObject &nodeData)
     widget->setData(nodeData);
     widget->updateScreenSize(m_phoneScreenshot.size());
     widget->show();
+
+    // Handle Click Multi sub-nodes
+    if (widget->mapType() == KeyMapWidget::MT_CLICK_MULTI && nodeData.contains("clickNodes")) {
+        QJsonArray clickNodes = nodeData["clickNodes"].toArray();
+        for (int i = 0; i < clickNodes.size(); ++i) {
+            QJsonObject clickNode = clickNodes[i].toObject();
+            if (clickNode.contains("pos")) {
+                QJsonObject pos = clickNode["pos"].toObject();
+                double x = pos["x"].toDouble(0.5);
+                double y = pos["y"].toDouble(0.5);
+
+                ClickMultiSubNode *subNode = new ClickMultiSubNode(i, widget, this);
+                subNode->setPosition(QPointF(x, y));
+                subNode->updateScreenSize(m_phoneScreenshot.size());
+                subNode->show();
+
+                widget->addSubNode(subNode);
+
+                connect(subNode, &ClickMultiSubNode::selected, this, [this, widget](ClickMultiSubNode *node) {
+                    Q_UNUSED(node);
+                    onKeyMapSelected(widget);
+                });
+
+                connect(subNode, &ClickMultiSubNode::positionChanged, this, [this, widget, i](const QPointF &pos) {
+                    // Update the clickNodes data in widget
+                    QJsonObject data = widget->data();
+                    if (data.contains("clickNodes")) {
+                        QJsonArray clickNodes = data["clickNodes"].toArray();
+                        if (i < clickNodes.size()) {
+                            QJsonObject clickNode = clickNodes[i].toObject();
+                            QJsonObject posObj;
+                            posObj["x"] = pos.x();
+                            posObj["y"] = pos.y();
+                            clickNode["pos"] = posObj;
+                            clickNodes[i] = clickNode;
+                            data["clickNodes"] = clickNodes;
+                            widget->setData(data);
+                        }
+                    }
+                });
+            }
+        }
+    }
 
     connect(widget, &KeyMapWidget::selected, this, &KeyMapEditor::onKeyMapSelected);
     connect(widget, &KeyMapWidget::deleted, this, &KeyMapEditor::onDeleteKeyMap);

@@ -18,6 +18,42 @@
 
 // Forward declaration
 class KeyMapNode;
+class KeyMapEditor;
+class KeyMapWidget;
+
+// Sub-node widget for Click Multi type
+class ClickMultiSubNode : public QWidget
+{
+    Q_OBJECT
+public:
+    explicit ClickMultiSubNode(int index, KeyMapWidget *parent, KeyMapEditor *editor);
+
+    void setPosition(const QPointF &pos);
+    QPointF position() const { return m_position; }
+    int index() const { return m_index; }
+    KeyMapWidget* parentWidget() const { return m_parentWidget; }
+
+    void updateScreenSize(const QSize &screenSize);
+
+signals:
+    void selected(ClickMultiSubNode *node);
+    void positionChanged(const QPointF &pos);
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
+
+private:
+    int m_index;
+    QPointF m_position;
+    KeyMapWidget *m_parentWidget;
+    KeyMapEditor *m_editor;
+    bool m_dragging;
+    QPoint m_dragStartPos;
+    QSize m_screenSize;
+};
 
 // Visual representation of a key mapping on the screen
 class KeyMapWidget : public QWidget
@@ -35,6 +71,7 @@ public:
     };
 
     explicit KeyMapWidget(QWidget *parent = nullptr);
+    ~KeyMapWidget();
 
     void setPosition(const QPointF &pos); // Position in percentage (0.0-1.0)
     void setMapType(MapType type);
@@ -48,7 +85,15 @@ public:
     QString comment() const { return m_comment; }
     QJsonObject data() const { return m_data; }
 
+    void setSelected(bool selected) { m_selected = selected; }
+    bool isSelected() const { return m_selected; }
+
     void updateScreenSize(const QSize &screenSize);
+
+    // Click Multi sub-nodes management
+    void addSubNode(ClickMultiSubNode *node) { m_subNodes.append(node); }
+    void clearSubNodes();
+    QVector<ClickMultiSubNode*> subNodes() const { return m_subNodes; }
 
 signals:
     void selected(KeyMapWidget *widget);
@@ -72,6 +117,7 @@ private:
     bool m_dragging;
     QPoint m_dragStartPos;
     QSize m_screenSize;
+    QVector<ClickMultiSubNode*> m_subNodes;
 
     QString getTypeIcon() const;
     QColor getTypeColor() const;
@@ -162,6 +208,7 @@ private:
 
     // Current selection
     KeyMapWidget *m_selectedWidget;
+    ClickMultiSubNode *m_selectedSubNode;
 
     // Switch key
     QString m_switchKey;

@@ -106,6 +106,8 @@ Dialog::Dialog(QWidget *parent) : QWidget(parent), ui(new Ui::Widget)
         }
     });
 
+    // Disable tray icon - exit directly on close
+    /*
     m_hideIcon = new QSystemTrayIcon(this);
     m_hideIcon->setIcon(QIcon(":/image/tray/logo.png"));
     m_menu = new QMenu(this);
@@ -123,6 +125,7 @@ Dialog::Dialog(QWidget *parent) : QWidget(parent), ui(new Ui::Widget)
         qApp->quit();
     });
     connect(m_hideIcon, &QSystemTrayIcon::activated, this, &Dialog::slotActivated);
+    */
 
     connect(&qsc::IDeviceManage::getInstance(), &qsc::IDeviceManage::deviceConnected, this, &Dialog::onDeviceConnected);
     connect(&qsc::IDeviceManage::getInstance(), &qsc::IDeviceManage::deviceDisconnected, this, &Dialog::onDeviceDisconnected);
@@ -273,15 +276,9 @@ void Dialog::slotActivated(QSystemTrayIcon::ActivationReason reason)
 
 void Dialog::closeEvent(QCloseEvent *event)
 {
-    this->hide();
-    if (!Config::getInstance().getTrayMessageShown()) {
-        Config::getInstance().setTrayMessageShown(true);
-        m_hideIcon->showMessage(tr("Notice"),
-                                tr("Hidden here!"),
-                                QSystemTrayIcon::Information,
-                                3000);
-    }
-    event->ignore();
+    // Exit application directly instead of hiding to tray
+    qApp->quit();
+    event->accept();
 }
 
 void Dialog::on_updateDevice_clicked()
